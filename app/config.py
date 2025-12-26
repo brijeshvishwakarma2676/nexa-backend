@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     
     # App
     APP_NAME: str = "Nexa"
+    VERSION: str = "1.0.0"
     DEBUG: bool = True
+    IS_PROD: bool = False
+    PORT: int = 8000
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./social.db"

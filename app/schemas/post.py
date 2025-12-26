@@ -29,6 +29,7 @@ class PostResponse(BaseModel):
     author: UserMinimal
     likes_count: int = 0
     comments_count: int = 0
+    shares_count: int = 0
     is_liked: bool = False
     
     class Config:

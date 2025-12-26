@@ -66,24 +66,27 @@ async def upload_story_image(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload an image for a story."""
+    """Upload an image for a story to Cloudinary."""
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    
-    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-    filename = f"story_{current_user.id}_{uuid.uuid4().hex}.{ext}"
-    filepath = os.path.join(settings.UPLOAD_DIR, filename)
     
     content = await file.read()
     if len(content) > settings.MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File too large")
     
-    with open(filepath, "wb") as f:
-        f.write(content)
-    
-    return {"image_url": f"/uploads/{filename}"}
+    try:
+        from app.utils.cloudinary import upload_story_image as cloudinary_upload
+        image_url = await cloudinary_upload(content, current_user.id)
+        return {"image_url": image_url}
+    except ValueError:
+        # Fallback to local storage if Cloudinary not configured
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+        filename = f"story_{current_user.id}_{uuid.uuid4().hex}.{ext}"
+        filepath = os.path.join(settings.UPLOAD_DIR, filename)
+        with open(filepath, "wb") as f:
+            f.write(content)
+        return {"image_url": f"/uploads/{filename}"}
 
 
 @router.get("", response_model=StoryListResponse)
@@ -122,7 +125,9 @@ async def get_stories(
     
     # Group by user
     user_stories = {}
+    story_ids = []
     for story in stories:
+        story_ids.append(story.id)
         if story.user_id not in user_stories:
             user_stories[story.user_id] = {
                 "user": story.author,
@@ -131,7 +136,26 @@ async def get_stories(
             }
         user_stories[story.user_id]["stories"].append(story)
     
-    # Build response with view status
+    # Batch fetch: current user's views (which stories they've seen)
+    viewed_result = await db.execute(
+        select(StoryView.story_id).where(
+            StoryView.story_id.in_(story_ids),
+            StoryView.viewer_id == current_user.id
+        )
+    )
+    viewed_story_ids = {r[0] for r in viewed_result.fetchall()}
+    
+    # Batch fetch: view counts per story
+    view_counts_result = await db.execute(
+        select(
+            StoryView.story_id,
+            func.count(StoryView.id).label("count")
+        ).where(StoryView.story_id.in_(story_ids))
+        .group_by(StoryView.story_id)
+    )
+    view_counts = {r[0]: r[1] for r in view_counts_result.fetchall()}
+    
+    # Build response with pre-fetched data
     story_groups = []
     for user_id, data in user_stories.items():
         user = data["user"]
@@ -141,21 +165,10 @@ async def get_stories(
         all_seen = True
         
         for story in stories_list:
-            # Check if current user viewed this story
-            view_result = await db.execute(
-                select(StoryView).where(
-                    StoryView.story_id == story.id,
-                    StoryView.viewer_id == current_user.id
-                )
-            )
-            is_viewed = view_result.scalar_one_or_none() is not None
+            is_viewed = story.id in viewed_story_ids
             
             if not is_viewed and story.user_id != current_user.id:
                 all_seen = False
-            
-            views_count = await db.scalar(
-                select(func.count(StoryView.id)).where(StoryView.story_id == story.id)
-            )
             
             story_responses.append(StoryResponse(
                 id=story.id,
@@ -164,7 +177,7 @@ async def get_stories(
                 created_at=story.created_at,
                 expires_at=story.expires_at,
                 author=UserMinimal.model_validate(user),
-                views_count=views_count or 0,
+                views_count=view_counts.get(story.id, 0),
                 is_viewed=is_viewed
             ))
         

@@ -30,6 +30,7 @@ class Post(Base):
     author = relationship("User", back_populates="posts")
     likes = relationship("Like", back_populates="post", cascade="all, delete-orphan")
     comments = relationship("Comment", back_populates="post", cascade="all, delete-orphan")
+    shares = relationship("Share", back_populates="post", cascade="all, delete-orphan")
 
 
 class Like(Base):
@@ -68,3 +69,21 @@ class Comment(Base):
     post = relationship("Post", back_populates="comments")
     author = relationship("User", back_populates="comments")
     parent = relationship("Comment", remote_side=[id], backref="replies")
+
+
+class Share(Base):
+    """Share model for tracking post shares."""
+    __tablename__ = "shares"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    post = relationship("Post", back_populates="shares")
+    user = relationship("User")
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="unique_share"),
+    )

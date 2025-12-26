@@ -11,7 +11,7 @@ import uuid
 from app.database import get_db
 from app.config import settings
 from app.models.user import User, Follow
-from app.models.post import Post, Like, Comment
+from app.models.post import Post, Like, Comment, Share
 from app.models.notification import Notification, NotificationType
 from app.schemas.post import (
     PostCreate, PostResponse, PostListResponse, PostUpdate,
@@ -23,7 +23,7 @@ from app.utils.auth import get_current_user
 router = APIRouter(prefix="/api/posts", tags=["Posts"])
 
 
-def build_post_response(post: Post, current_user_id: int, likes_count: int, comments_count: int, is_liked: bool) -> PostResponse:
+def build_post_response(post: Post, current_user_id: int, likes_count: int, comments_count: int, shares_count: int, is_liked: bool) -> PostResponse:
     """Build PostResponse from Post model."""
     return PostResponse(
         id=post.id,
@@ -35,6 +35,7 @@ def build_post_response(post: Post, current_user_id: int, likes_count: int, comm
         author=UserMinimal.model_validate(post.author),
         likes_count=likes_count,
         comments_count=comments_count,
+        shares_count=shares_count,
         is_liked=is_liked
     )
 
@@ -63,7 +64,7 @@ async def create_post(
     await db.flush()
     await db.refresh(post, ["author"])
     
-    return build_post_response(post, current_user.id, 0, 0, False)
+    return build_post_response(post, current_user.id, 0, 0, 0, False)
 
 
 @router.post("/upload-image")
@@ -158,6 +159,9 @@ async def get_feed(
         comments_count = await db.scalar(
             select(func.count(Comment.id)).where(Comment.post_id == post.id)
         )
+        shares_count = await db.scalar(
+            select(func.count(Share.id)).where(Share.post_id == post.id)
+        )
         is_liked = await db.scalar(
             select(func.count(Like.id)).where(
                 Like.post_id == post.id,
@@ -166,7 +170,7 @@ async def get_feed(
         ) > 0
         
         post_responses.append(build_post_response(
-            post, current_user.id, likes_count or 0, comments_count or 0, is_liked
+            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked
         ))
     
     next_cursor = None
@@ -227,6 +231,9 @@ async def get_user_posts(
         comments_count = await db.scalar(
             select(func.count(Comment.id)).where(Comment.post_id == post.id)
         )
+        shares_count = await db.scalar(
+            select(func.count(Share.id)).where(Share.post_id == post.id)
+        )
         is_liked = await db.scalar(
             select(func.count(Like.id)).where(
                 Like.post_id == post.id,
@@ -235,7 +242,7 @@ async def get_user_posts(
         ) > 0
         
         post_responses.append(build_post_response(
-            post, current_user.id, likes_count or 0, comments_count or 0, is_liked
+            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked
         ))
     
     next_cursor = posts[-1].created_at.isoformat() if has_more and posts else None
@@ -264,6 +271,9 @@ async def get_post(
     comments_count = await db.scalar(
         select(func.count(Comment.id)).where(Comment.post_id == post.id)
     )
+    shares_count = await db.scalar(
+        select(func.count(Share.id)).where(Share.post_id == post.id)
+    )
     is_liked = await db.scalar(
         select(func.count(Like.id)).where(
             Like.post_id == post.id,
@@ -271,7 +281,7 @@ async def get_post(
         )
     ) > 0
     
-    return build_post_response(post, current_user.id, likes_count or 0, comments_count or 0, is_liked)
+    return build_post_response(post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked)
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_200_OK)
@@ -362,6 +372,62 @@ async def unlike_post(
     )
     
     return LikeResponse(post_id=post_id, likes_count=likes_count or 0, is_liked=False)
+
+
+# Share endpoints
+@router.post("/{post_id}/share")
+async def share_post(
+    post_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Share a post."""
+    # Check if post exists
+    post = await db.scalar(select(Post).where(Post.id == post_id))
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Check if already shared
+    existing = await db.scalar(
+        select(Share).where(Share.post_id == post_id, Share.user_id == current_user.id)
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Already shared")
+    
+    share = Share(user_id=current_user.id, post_id=post_id)
+    db.add(share)
+    await db.flush()
+    
+    shares_count = await db.scalar(
+        select(func.count(Share.id)).where(Share.post_id == post_id)
+    )
+    
+    return {"post_id": post_id, "shares_count": shares_count, "is_shared": True}
+
+
+@router.delete("/{post_id}/share")
+async def unshare_post(
+    post_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Remove a share from a post."""
+    result = await db.execute(
+        select(Share).where(Share.post_id == post_id, Share.user_id == current_user.id)
+    )
+    share = result.scalar_one_or_none()
+    
+    if not share:
+        raise HTTPException(status_code=400, detail="Not shared")
+    
+    await db.delete(share)
+    await db.flush()
+    
+    shares_count = await db.scalar(
+        select(func.count(Share.id)).where(Share.post_id == post_id)
+    )
+    
+    return {"post_id": post_id, "shares_count": shares_count or 0, "is_shared": False}
 
 
 # Comment endpoints
