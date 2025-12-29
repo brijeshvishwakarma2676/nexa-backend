@@ -68,6 +68,11 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    
+    # Close database connections
+    from app.database import engine
+    await engine.dispose()
+    logger.info("Database connections closed")
 
 
 # Create FastAPI app
