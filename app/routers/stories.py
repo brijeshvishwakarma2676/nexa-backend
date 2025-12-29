@@ -104,21 +104,11 @@ async def get_stories(
     """
     now = datetime.utcnow()
     
-    # Get IDs of users we follow + self
-    following_result = await db.execute(
-        select(Follow.following_id).where(Follow.follower_id == current_user.id)
-    )
-    following_ids = [r[0] for r in following_result.fetchall()]
-    following_ids.append(current_user.id)
-    
-    # Get all active stories from followed users
+    # Get all active stories from all users (not just followed)
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.author))
-        .where(
-            Story.user_id.in_(following_ids),
-            Story.expires_at > now
-        )
+        .where(Story.expires_at > now)
         .order_by(Story.created_at.desc())
     )
     stories = result.scalars().all()

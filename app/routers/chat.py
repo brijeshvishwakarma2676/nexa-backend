@@ -274,7 +274,8 @@ async def send_message(
     await db.flush()
     await db.refresh(message)
     
-    return MessageResponse(
+    # Build message response
+    message_response = MessageResponse(
         id=message.id,
         conversation_id=message.conversation_id,
         content=message.content,
@@ -282,6 +283,45 @@ async def send_message(
         created_at=message.created_at,
         sender=UserMinimal.model_validate(current_user)
     )
+    
+    # Broadcast via WebSocket to other conversation members
+    try:
+        from app.websocket.manager import manager
+        
+        # Get other members
+        result = await db.execute(
+            select(ConversationMember.user_id).where(
+                ConversationMember.conversation_id == conversation_id,
+                ConversationMember.user_id != current_user.id
+            )
+        )
+        other_user_ids = [r[0] for r in result.fetchall()]
+        
+        # Broadcast to recipients
+        ws_message = {
+            "type": "new_message",
+            "message": {
+                "id": message.id,
+                "conversation_id": message.conversation_id,
+                "content": message.content,
+                "read": message.read,
+                "created_at": message.created_at.isoformat(),
+                "sender": {
+                    "id": current_user.id,
+                    "username": current_user.username,
+                    "display_name": current_user.display_name,
+                    "avatar_url": current_user.avatar_url
+                }
+            }
+        }
+        
+        for recipient_id in other_user_ids:
+            await manager.send_personal_message(recipient_id, ws_message)
+    except Exception as e:
+        # Don't fail the request if WebSocket broadcast fails
+        print(f"WebSocket broadcast error: {e}")
+    
+    return message_response
 
 
 @router.patch("/{conversation_id}/read")

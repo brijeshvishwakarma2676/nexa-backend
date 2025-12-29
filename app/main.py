@@ -24,22 +24,19 @@ from app.utils.tasks import run_periodic_cleanup
 # Get settings first
 settings = get_settings()
 
-# Configure logging - write to /tmp to avoid triggering file watcher
-log_file = "/tmp/nexa_app.log" if not settings.IS_PROD else "app.log"
+# Configure logging - single handler to avoid duplicates
+log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(
-    filename=log_file,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
+    format=log_format,
+    handlers=[
+        logging.StreamHandler(),  # Console only
+    ]
 )
 
-# Also log to console
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-logging.getLogger().addHandler(console_handler)
-
-# Silence watchfiles logger to prevent noisy output
+# Silence noisy loggers
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)  # Reduce SQL noise
 
 logger = logging.getLogger(__name__)
 
