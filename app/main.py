@@ -61,18 +61,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
-    logger.info("Shutting down...")
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    
-    # Close database connections
-    from app.database import engine
-    await engine.dispose()
-    logger.info("Database connections closed")
+
 
 
 # Create FastAPI app
@@ -91,9 +80,30 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS if settings.IS_PROD else ["*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    allow_methods=["*"],)
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    return response
+
+# Clean up temporary files on shutdown
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Shutdown
+    logger.info("Shutting down...")
+    if 'cleanup_task' in locals() and cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    
+    # Close database connections
+    from app.database import engine
+    await engine.dispose()
+    logger.info("Database connections closed")
 
 # Static files for uploads
 if not os.path.exists(settings.UPLOAD_DIR):

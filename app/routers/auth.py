@@ -146,3 +146,90 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current authenticated user's profile."""
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/google", response_model=AuthResponse)
+async def google_auth(request: dict, db: AsyncSession = Depends(get_db)):
+    """
+    Login or register with Google.
+    
+    Flow:
+    1. Verify Google ID token
+    2. Find existing user by google_id or email
+    3. If not found, create new user
+    4. Return tokens
+    """
+    import httpx
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+    from app.config import settings
+    
+    token = request.get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+    
+    # Verify with Google
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            google_requests.Request(), 
+            settings.GOOGLE_CLIENT_ID
+        )
+        
+        google_id = idinfo["sub"]
+        email = idinfo["email"]
+        name = idinfo.get("name", email.split("@")[0])
+        picture = idinfo.get("picture")
+        
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
+    
+    # Find user by google_id
+    result = await db.execute(select(User).where(User.google_id == google_id))
+    user = result.scalar_one_or_none()
+    
+    # If not found, check by email
+    if not user:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        
+        if user:
+            # Link Google to existing account
+            user.google_id = google_id
+            if picture and not user.avatar_url:
+                user.avatar_url = picture
+        else:
+            # Create new user
+            base_username = email.split("@")[0].lower().replace(".", "_")
+            username = base_username
+            
+            # Make username unique
+            counter = 1
+            while True:
+                result = await db.execute(select(User).where(User.username == username))
+                if not result.scalar_one_or_none():
+                    break
+                username = f"{base_username}{counter}"
+                counter += 1
+            
+            user = User(
+                email=email,
+                username=username,
+                google_id=google_id,
+                display_name=name,
+                avatar_url=picture
+            )
+            db.add(user)
+        
+        await db.flush()
+        await db.refresh(user)
+    
+    # Generate tokens
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+    
+    return AuthResponse(
+        user=UserResponse.model_validate(user),
+        access_token=access_token,
+        refresh_token=refresh_token
+    )

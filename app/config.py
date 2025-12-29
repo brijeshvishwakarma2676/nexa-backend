@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
     
+    # Google OAuth
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    
     # Stories
     STORY_EXPIRY_HOURS: int = 24
     

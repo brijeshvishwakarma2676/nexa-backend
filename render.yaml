@@ -6,7 +6,7 @@ services:
     startCommand: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.0
+        value: 3.11.0
       - key: IS_PROD
         value: true
     autoDeploy: false
