@@ -80,7 +80,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS if settings.IS_PROD else ["*"],
     allow_credentials=True,
-    allow_methods=["*"],)
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
