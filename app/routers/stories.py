@@ -1,7 +1,7 @@
 """Story routes: create, view, list grouped by user, track views."""
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from typing import List
 from datetime import datetime
@@ -104,11 +104,27 @@ async def get_stories(
     """
     now = datetime.utcnow()
     
-    # Get all active stories from all users (not just followed)
+    # Get IDs of users we follow (only ACTIVE follows)
+    following_result = await db.execute(
+        select(Follow.following_id).where(
+            Follow.follower_id == current_user.id,
+            Follow.status == "active"
+        )
+    )
+    following_ids = [r[0] for r in following_result.fetchall()]
+    following_ids.append(current_user.id)  # Include own stories
+    
+    # Get active stories from: followed users, self, or public (non-private) accounts
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.author))
-        .where(Story.expires_at > now)
+        .where(
+            Story.expires_at > now,
+            or_(
+                Story.user_id.in_(following_ids),
+                Story.author.has(User.is_private == False)
+            )
+        )
         .order_by(Story.created_at.desc())
     )
     stories = result.scalars().all()
@@ -213,6 +229,18 @@ async def get_story(
     
     if story.is_expired:
         raise HTTPException(status_code=404, detail="Story has expired")
+    
+    # Check privacy: if author is private, check if we follow them
+    if story.author.is_private and story.user_id != current_user.id:
+        is_following = await db.scalar(
+            select(func.count(Follow.id)).where(
+                Follow.follower_id == current_user.id,
+                Follow.following_id == story.user_id,
+                Follow.status == "active"
+            )
+        ) > 0
+        if not is_following:
+            raise HTTPException(status_code=403, detail="This account is private")
     
     # Mark as viewed (if not own story and not already viewed)
     if story.user_id != current_user.id:

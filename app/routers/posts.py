@@ -1,7 +1,7 @@
 """Post routes: CRUD, feed, likes, comments."""
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import selectinload
 from typing import Optional
 from datetime import datetime
@@ -19,11 +19,11 @@ from app.schemas.post import (
 )
 from app.schemas.user import UserMinimal
 from app.utils.auth import get_current_user
+from app.routers.users import get_relationship_status
 
 router = APIRouter(prefix="/api/posts", tags=["Posts"])
 
-
-def build_post_response(post: Post, current_user_id: int, likes_count: int, comments_count: int, shares_count: int, is_liked: bool) -> PostResponse:
+def build_post_response(post: Post, current_user_id: int, likes_count: int, comments_count: int, shares_count: int, is_liked: bool, relationship_status: str = "none") -> PostResponse:
     """Build PostResponse from Post model."""
     return PostResponse(
         id=post.id,
@@ -36,7 +36,8 @@ def build_post_response(post: Post, current_user_id: int, likes_count: int, comm
         likes_count=likes_count,
         comments_count=comments_count,
         shares_count=shares_count,
-        is_liked=is_liked
+        is_liked=is_liked,
+        relationship_status=relationship_status
     )
 
 
@@ -64,7 +65,7 @@ async def create_post(
     await db.flush()
     await db.refresh(post, ["author"])
     
-    return build_post_response(post, current_user.id, 0, 0, 0, False)
+    return build_post_response(post, current_user.id, 0, 0, 0, False, "self")
 
 
 @router.post("/upload-image")
@@ -113,21 +114,36 @@ async def get_feed(
     
     Cursor-based pagination using created_at timestamp.
     """
-    # Get IDs of users we follow
+    # Get IDs of users we follow (only ACTIVE follows)
     following_result = await db.execute(
-        select(Follow.following_id).where(Follow.follower_id == current_user.id)
+        select(Follow.following_id).where(
+            Follow.follower_id == current_user.id,
+            Follow.status == "active"
+        )
     )
     following_ids = [r[0] for r in following_result.fetchall()]
     following_ids.append(current_user.id)  # Include own posts
     
+    # Get IDs of private accounts we don't follow
+    private_users_result = await db.execute(
+        select(User.id).where(
+            User.is_private == True,
+            User.id.not_in(following_ids)
+        )
+    )
+    private_not_following = [r[0] for r in private_users_result.fetchall()]
+    
     # Base query
     query = select(Post).options(selectinload(Post.author))
     
-    # Filter: own posts OR followed users' posts OR public posts
+    # Filter: own posts OR followed users' posts OR public posts from non-private accounts
     query = query.where(
         or_(
             Post.user_id.in_(following_ids),
-            Post.visibility == "public"
+            and_(
+                Post.visibility == "public",
+                Post.user_id.not_in(private_not_following) if private_not_following else True
+            )
         )
     )
     
@@ -169,8 +185,10 @@ async def get_feed(
             )
         ) > 0
         
+        rel_status = await get_relationship_status(current_user.id, post.author.id, db)
+        
         post_responses.append(build_post_response(
-            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked
+            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked, rel_status
         ))
     
     next_cursor = None
@@ -241,8 +259,10 @@ async def get_user_posts(
             )
         ) > 0
         
+        rel_status = await get_relationship_status(current_user.id, post.author.id, db)
+        
         post_responses.append(build_post_response(
-            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked
+            post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked, rel_status
         ))
     
     next_cursor = posts[-1].created_at.isoformat() if has_more and posts else None
@@ -281,7 +301,9 @@ async def get_post(
         )
     ) > 0
     
-    return build_post_response(post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked)
+    rel_status = await get_relationship_status(current_user.id, post.author.id, db)
+    
+    return build_post_response(post, current_user.id, likes_count or 0, comments_count or 0, shares_count or 0, is_liked, rel_status)
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_200_OK)

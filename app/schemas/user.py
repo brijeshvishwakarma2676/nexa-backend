@@ -59,11 +59,12 @@ class UserResponse(BaseModel):
 
 class UserProfileResponse(UserResponse):
     """Extended user profile with stats."""
-    posts_count: int = 0
-    followers_count: int = 0
-    following_count: int = 0
+    posts_count: Optional[int] = 0  # None when hidden (private + not following)
+    followers_count: Optional[int] = 0
+    following_count: Optional[int] = 0
     is_following: bool = False
     relationship_status: str = "none"
+    is_accessible: bool = True  # False if private and viewer can't see content
 
 
 class UserMinimal(BaseModel):

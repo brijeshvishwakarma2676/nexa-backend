@@ -408,26 +408,36 @@ async def get_user_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Counts (only active followers)
-    posts_count = await db.scalar(
-        select(func.count(Post.id)).where(Post.user_id == user.id)
-    )
-    followers_count = await db.scalar(
-        select(func.count(Follow.id)).where(
-            Follow.following_id == user.id,
-            Follow.status == FollowStatus.ACTIVE.value
-        )
-    )
-    following_count = await db.scalar(
-        select(func.count(Follow.id)).where(
-            Follow.follower_id == user.id,
-            Follow.status == FollowStatus.ACTIVE.value
-        )
-    )
-    
     # Relationship status
     rel_status = await get_relationship_status(current_user.id, user.id, db)
     is_following = rel_status == "following"
+    is_owner = current_user.id == user.id
+    
+    # Determine if viewer can access private content
+    is_accessible = is_owner or is_following or not (user.is_private or False)
+    
+    # Counts (only active followers)
+    if is_accessible:
+        posts_count = await db.scalar(
+            select(func.count(Post.id)).where(Post.user_id == user.id)
+        )
+        followers_count = await db.scalar(
+            select(func.count(Follow.id)).where(
+                Follow.following_id == user.id,
+                Follow.status == FollowStatus.ACTIVE.value
+            )
+        )
+        following_count = await db.scalar(
+            select(func.count(Follow.id)).where(
+                Follow.follower_id == user.id,
+                Follow.status == FollowStatus.ACTIVE.value
+            )
+        )
+    else:
+        # Private profile, hide counts
+        posts_count = None
+        followers_count = None
+        following_count = None
     
     return UserProfileResponse(
         id=user.id,
@@ -439,11 +449,12 @@ async def get_user_profile(
         cover_url=user.cover_url,
         is_private=user.is_private or False,
         created_at=user.created_at,
-        posts_count=posts_count or 0,
-        followers_count=followers_count or 0,
-        following_count=following_count or 0,
+        posts_count=posts_count,
+        followers_count=followers_count,
+        following_count=following_count,
         is_following=is_following,
-        relationship_status=rel_status
+        relationship_status=rel_status,
+        is_accessible=is_accessible
     )
 
 
@@ -533,13 +544,28 @@ async def upload_cover_endpoint(
     return UserResponse.model_validate(current_user)
 
 
-@router.get("/{user_id}/followers", response_model=List[UserMinimal])
+@router.get("/{user_id}/followers", response_model=List[UserSearchResult])
 async def get_followers(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get list of users who follow this user (active only)."""
+    # Check if user exists and if we can view their followers
+    result = await db.execute(select(User).where(User.id == user_id))
+    target_user = result.scalar_one_or_none()
+    
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check privacy permissions
+    is_owner = current_user.id == user_id
+    rel_status = await get_relationship_status(current_user.id, user_id, db)
+    is_following = rel_status == "following"
+    
+    if target_user.is_private and not is_owner and not is_following:
+        raise HTTPException(status_code=403, detail="This account is private")
+    
     result = await db.execute(
         select(User)
         .join(Follow, Follow.follower_id == User.id)
@@ -550,16 +576,43 @@ async def get_followers(
     )
     followers = result.scalars().all()
     
-    return [UserMinimal.model_validate(f) for f in followers]
+    results = []
+    for f in followers:
+        rel_status = await get_relationship_status(current_user.id, f.id, db)
+        results.append(UserSearchResult(
+            id=f.id,
+            username=f.username,
+            display_name=f.display_name,
+            avatar_url=f.avatar_url,
+            is_private=f.is_private or False,
+            relationship_status=rel_status
+        ))
+    
+    return results
 
 
-@router.get("/{user_id}/following", response_model=List[UserMinimal])
+@router.get("/{user_id}/following", response_model=List[UserSearchResult])
 async def get_following(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get list of users this user follows (active only)."""
+    # Check if user exists and if we can view who they follow
+    result = await db.execute(select(User).where(User.id == user_id))
+    target_user = result.scalar_one_or_none()
+    
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check privacy permissions
+    is_owner = current_user.id == user_id
+    rel_status = await get_relationship_status(current_user.id, user_id, db)
+    is_following = rel_status == "following"
+    
+    if target_user.is_private and not is_owner and not is_following:
+        raise HTTPException(status_code=403, detail="This account is private")
+    
     result = await db.execute(
         select(User)
         .join(Follow, Follow.following_id == User.id)
@@ -570,4 +623,16 @@ async def get_following(
     )
     following = result.scalars().all()
     
-    return [UserMinimal.model_validate(f) for f in following]
+    results = []
+    for f in following:
+        rel_status = await get_relationship_status(current_user.id, f.id, db)
+        results.append(UserSearchResult(
+            id=f.id,
+            username=f.username,
+            display_name=f.display_name,
+            avatar_url=f.avatar_url,
+            is_private=f.is_private or False,
+            relationship_status=rel_status
+        ))
+    
+    return results

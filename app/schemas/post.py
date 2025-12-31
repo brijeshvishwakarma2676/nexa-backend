@@ -31,6 +31,7 @@ class PostResponse(BaseModel):
     comments_count: int = 0
     shares_count: int = 0
     is_liked: bool = False
+    relationship_status: str = "none"
     
     class Config:
         from_attributes = True
