@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-in-production-min-32-chars"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
     
     # CORS
     CORS_ORIGINS: list[str] = [
