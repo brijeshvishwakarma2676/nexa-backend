@@ -454,7 +454,14 @@ async def get_user_profile(
         following_count=following_count,
         is_following=is_following,
         relationship_status=rel_status,
-        is_accessible=is_accessible
+        is_accessible=is_accessible,
+        # About section
+        workplace=user.workplace,
+        education=user.education,
+        location=user.location,
+        hometown=user.hometown,
+        user_relationship_status=user.relationship_status,
+        website=user.website
     )
 
 
@@ -474,6 +481,16 @@ async def update_profile(
     await db.refresh(current_user)
     
     return UserResponse.model_validate(current_user)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete current user's account and all associated data."""
+    await db.delete(current_user)
+    return None
 
 
 @router.post("/me/avatar", response_model=UserResponse)
@@ -524,6 +541,14 @@ async def upload_cover_endpoint(
     if len(content) > settings.MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File too large")
     
+    # Process image to Facebook ideal dimensions (851x315)
+    try:
+        from app.utils.image_processing import process_cover_photo
+        content = process_cover_photo(content)
+    except Exception as e:
+        # If processing fails (e.g. invalid image format), raise error
+        raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
+    
     try:
         from app.utils.cloudinary import upload_cover
         cover_url = await upload_cover(content, current_user.id)
@@ -531,8 +556,7 @@ async def upload_cover_endpoint(
     except ValueError:
         # Fallback to local storage if Cloudinary not configured
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-        filename = f"cover_{current_user.id}_{uuid.uuid4().hex}.{ext}"
+        filename = f"cover_{current_user.id}_{uuid.uuid4().hex}.jpg"
         filepath = os.path.join(settings.UPLOAD_DIR, filename)
         with open(filepath, "wb") as f:
             f.write(content)
@@ -636,3 +660,80 @@ async def get_following(
         ))
     
     return results
+
+
+# ===============================
+# PHOTOS & FRIENDS
+# ===============================
+
+@router.get("/{user_id}/photos")
+async def get_user_photos(
+    user_id: int,
+    limit: int = 9,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get photos from user's posts."""
+    # Get posts with media
+    result = await db.execute(
+        select(Post)
+        .where(Post.user_id == user_id, Post.image_url.isnot(None))
+        .order_by(Post.created_at.desc())
+        .limit(limit)
+    )
+    posts = result.scalars().all()
+    
+    photos = [{"id": p.id, "url": p.image_url} for p in posts if p.image_url]
+    return {"photos": photos, "total": len(photos)}
+
+
+@router.get("/{user_id}/friends")
+async def get_user_friends(
+    user_id: int,
+    limit: int = 9,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get mutual friends (users who follow each other)."""
+    # Users that user follows AND are followed by user
+    result = await db.execute(
+        select(User)
+        .join(Follow, Follow.following_id == User.id)
+        .where(
+            Follow.follower_id == user_id,
+            Follow.status == FollowStatus.ACTIVE.value,
+            # Check if they also follow back
+            User.id.in_(
+                select(Follow.follower_id).where(
+                    Follow.following_id == user_id,
+                    Follow.status == FollowStatus.ACTIVE.value
+                )
+            )
+        )
+        .limit(limit)
+    )
+    friends = result.scalars().all()
+    
+    # Count total mutual friends
+    count_result = await db.scalar(
+        select(func.count(User.id))
+        .join(Follow, Follow.following_id == User.id)
+        .where(
+            Follow.follower_id == user_id,
+            Follow.status == FollowStatus.ACTIVE.value,
+            User.id.in_(
+                select(Follow.follower_id).where(
+                    Follow.following_id == user_id,
+                    Follow.status == FollowStatus.ACTIVE.value
+                )
+            )
+        )
+    )
+    
+    return {
+        "friends": [
+            {"id": f.id, "username": f.username, "display_name": f.display_name, "avatar_url": f.avatar_url}
+            for f in friends
+        ],
+        "total": count_result or 0
+    }

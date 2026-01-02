@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, AuthResponse,
-    RefreshTokenRequest, Token
+    RefreshTokenRequest, Token, PasswordChange
 )
 from app.utils.auth import (
     hash_password, verify_password,
@@ -146,6 +146,32 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current authenticated user's profile."""
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/change-password")
+async def change_password(
+    data: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Change current user's password."""
+    # Google users don't have a password hash
+    if current_user.password_hash is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Accounts logged in with Google do not have a password. Please use Google to login."
+        )
+
+    if not verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password"
+        )
+    
+    current_user.password_hash = hash_password(data.new_password)
+    await db.flush()
+    
+    return {"message": "Password updated successfully"}
 
 
 @router.post("/google", response_model=AuthResponse)

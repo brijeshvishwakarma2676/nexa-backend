@@ -31,6 +31,12 @@ class UserLogin(BaseModel):
     password: str
 
 
+class PasswordChange(BaseModel):
+    """Schema for changing user password."""
+    current_password: str
+    new_password: str = Field(..., min_length=6, max_length=100)
+
+
 class UserUpdate(BaseModel):
     """Schema for updating user profile."""
     display_name: Optional[str] = Field(None, max_length=100)
@@ -38,6 +44,13 @@ class UserUpdate(BaseModel):
     avatar_url: Optional[str] = None
     cover_url: Optional[str] = None
     is_private: Optional[bool] = None
+    # About section
+    workplace: Optional[str] = Field(None, max_length=200)
+    education: Optional[str] = Field(None, max_length=200)
+    location: Optional[str] = Field(None, max_length=100)
+    hometown: Optional[str] = Field(None, max_length=100)
+    relationship_status: Optional[str] = Field(None, max_length=50)
+    website: Optional[str] = Field(None, max_length=200)
 
 
 # Response schemas
@@ -59,12 +72,19 @@ class UserResponse(BaseModel):
 
 class UserProfileResponse(UserResponse):
     """Extended user profile with stats."""
-    posts_count: Optional[int] = 0  # None when hidden (private + not following)
+    posts_count: Optional[int] = 0
     followers_count: Optional[int] = 0
     following_count: Optional[int] = 0
     is_following: bool = False
     relationship_status: str = "none"
-    is_accessible: bool = True  # False if private and viewer can't see content
+    is_accessible: bool = True
+    # About section
+    workplace: Optional[str] = None
+    education: Optional[str] = None
+    location: Optional[str] = None
+    hometown: Optional[str] = None
+    user_relationship_status: Optional[str] = None  # renamed to avoid conflict
+    website: Optional[str] = None
 
 
 class UserMinimal(BaseModel):

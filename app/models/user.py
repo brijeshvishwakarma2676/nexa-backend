@@ -29,6 +29,14 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)
     cover_url = Column(String(500), nullable=True)
     
+    # About section
+    workplace = Column(String(200), nullable=True)
+    education = Column(String(200), nullable=True)
+    location = Column(String(100), nullable=True)
+    hometown = Column(String(100), nullable=True)
+    relationship_status = Column(String(50), nullable=True)
+    website = Column(String(200), nullable=True)
+    
     # Privacy setting
     is_private = Column(Boolean, default=False)
     
