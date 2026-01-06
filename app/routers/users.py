@@ -621,7 +621,7 @@ async def get_following(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get list of users this user follows (active only)."""
+    """Get list of users this user follows (one-sided only, excludes mutual friends)."""
     # Check if user exists and if we can view who they follow
     result = await db.execute(select(User).where(User.id == user_id))
     target_user = result.scalar_one_or_none()
@@ -637,6 +637,7 @@ async def get_following(
     if target_user.is_private and not is_owner and not is_following:
         raise HTTPException(status_code=403, detail="This account is private")
     
+    # Get all users this user follows
     result = await db.execute(
         select(User)
         .join(Follow, Follow.following_id == User.id)
@@ -649,15 +650,27 @@ async def get_following(
     
     results = []
     for f in following:
-        rel_status = await get_relationship_status(current_user.id, f.id, db)
-        results.append(UserSearchResult(
-            id=f.id,
-            username=f.username,
-            display_name=f.display_name,
-            avatar_url=f.avatar_url,
-            is_private=f.is_private or False,
-            relationship_status=rel_status
-        ))
+        # Check if this user follows back (i.e., is it mutual?)
+        reverse_follow = await db.execute(
+            select(Follow).where(
+                Follow.follower_id == f.id,
+                Follow.following_id == user_id,
+                Follow.status == FollowStatus.ACTIVE.value
+            )
+        )
+        follows_back = reverse_follow.scalar_one_or_none()
+        
+        # Only include if NOT mutual (one-sided following only)
+        if not follows_back:
+            rel_status = await get_relationship_status(current_user.id, f.id, db)
+            results.append(UserSearchResult(
+                id=f.id,
+                username=f.username,
+                display_name=f.display_name,
+                avatar_url=f.avatar_url,
+                is_private=f.is_private or False,
+                relationship_status=rel_status
+            ))
     
     return results
 
