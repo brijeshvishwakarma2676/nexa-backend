@@ -123,6 +123,7 @@ class UserSearchResponse(BaseModel):
 
     users: List[UserSearchResult]
     total: int
+    has_more: bool = False
 
 
 # Follow request schemas
