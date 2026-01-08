@@ -34,10 +34,15 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5MB
     
-    # Cloudinary
+    # Cloudinary (Images)
     CLOUDINARY_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
+    
+    # Cloudinary Video (Reels - separate account)
+    CLOUDINARY_VIDEO_CLOUD_NAME: Optional[str] = None
+    CLOUDINARY_VIDEO_API_KEY: Optional[str] = None
+    CLOUDINARY_VIDEO_API_SECRET: Optional[str] = None
     
     # Google OAuth
     GOOGLE_CLIENT_ID: Optional[str] = None

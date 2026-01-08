@@ -17,7 +17,7 @@ import asyncio
 
 from app.config import get_settings
 from app.database import create_tables
-from app.routers import auth, users, posts, stories, chat, notifications
+from app.routers import auth, users, posts, stories, chat, notifications, reels
 from app.websocket.chat import router as ws_router
 from app.utils.tasks import run_periodic_cleanup
 
@@ -61,7 +61,21 @@ async def lifespan(app: FastAPI):
     
     yield
     
-
+    # Shutdown
+    logger.info("Shutting down...")
+    
+    # Cancel background tasks
+    if 'cleanup_task' in locals() and cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+            
+    # Close database connections
+    from app.database import engine
+    await engine.dispose()
+    logger.info("Database connections closed")
 
 
 # Create FastAPI app
@@ -90,23 +104,6 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
     return response
 
-# Clean up temporary files on shutdown
-@app.on_event("shutdown")
-async def shutdown_event():
-    # Shutdown
-    logger.info("Shutting down...")
-    if 'cleanup_task' in locals() and cleanup_task:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
-    
-    # Close database connections
-    from app.database import engine
-    await engine.dispose()
-    logger.info("Database connections closed")
-
 # Static files for uploads
 if not os.path.exists(settings.UPLOAD_DIR):
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -119,6 +116,7 @@ app.include_router(posts.router)
 app.include_router(stories.router)
 app.include_router(chat.router)
 app.include_router(notifications.router)
+app.include_router(reels.router)
 app.include_router(ws_router)
 
 
