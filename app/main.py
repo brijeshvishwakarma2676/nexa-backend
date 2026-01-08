@@ -1,4 +1,5 @@
 """FastAPI main application entry point."""
+
 import sys
 import os
 
@@ -31,7 +32,7 @@ logging.basicConfig(
     format=log_format,
     handlers=[
         logging.StreamHandler(),  # Console only
-    ]
+    ],
 )
 
 # Silence noisy loggers
@@ -46,34 +47,44 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
     # Startup
     logger.info("Starting up Nexa backend...")
-    
+
     # Create database tables
     await create_tables()
     logger.info("Database tables created")
-    
+
     # Create uploads directory
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info(f"Uploads directory: {settings.UPLOAD_DIR}")
-    
+
+    # Start keep-alive service
+    from app.utils.keep_alive import keep_alive_service
+
+    keep_alive_service.connect()
+    keep_alive_service.start()
+
     # Start background tasks
     cleanup_task = asyncio.create_task(run_periodic_cleanup())
     logger.info("Background tasks started")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down...")
-    
+
+    # Stop keep-alive service
+    keep_alive_service.stop()
+
     # Cancel background tasks
-    if 'cleanup_task' in locals() and cleanup_task:
+    if "cleanup_task" in locals() and cleanup_task:
         cleanup_task.cancel()
         try:
             await cleanup_task
         except asyncio.CancelledError:
             pass
-            
+
     # Close database connections
     from app.database import engine
+
     await engine.dispose()
     logger.info("Database connections closed")
 
@@ -86,7 +97,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -98,11 +109,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
     return response
+
 
 # Static files for uploads
 if not os.path.exists(settings.UPLOAD_DIR):
@@ -123,11 +136,7 @@ app.include_router(ws_router)
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {
-        "name": settings.APP_NAME,
-        "status": "running",
-        "version": settings.VERSION
-    }
+    return {"name": settings.APP_NAME, "status": "running", "version": settings.VERSION}
 
 
 @app.get("/api/health")
@@ -138,7 +147,7 @@ async def health_check():
 
 if __name__ == "__main__":
     logger.info(f"Starting {settings.APP_NAME} on port {settings.PORT}")
-    
+
     if platform.system() != "Linux" and settings.IS_PROD:
         # Use Gunicorn for production on non-Linux systems
         try:
@@ -191,4 +200,3 @@ if __name__ == "__main__":
             reload_excludes=["*.log", "*.db", "uploads/*", "__pycache__/*"],
             log_level="info" if not settings.IS_PROD else "warning",
         )
-

@@ -1,4 +1,5 @@
 """Application configuration settings."""
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -6,50 +7,53 @@ from typing import Optional
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     # App
     APP_NAME: str = "Nexa"
     VERSION: str = "1.0.0"
     DEBUG: bool = True
     IS_PROD: bool = False
     PORT: int = 8000
-    
+
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./social.db"
-    
+
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-in-production-min-32-chars"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
-    
+
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://nexa-beige-pi.vercel.app"
+        "https://nexa-beige-pi.vercel.app",
     ]
-    
+
     # File uploads
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5MB
-    
+
     # Cloudinary (Images)
     CLOUDINARY_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
-    
+
     # Cloudinary Video (Reels - separate account)
     CLOUDINARY_VIDEO_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_VIDEO_API_KEY: Optional[str] = None
     CLOUDINARY_VIDEO_API_SECRET: Optional[str] = None
-    
+
     # Google OAuth
     GOOGLE_CLIENT_ID: Optional[str] = None
-    
+
     # Stories
     STORY_EXPIRY_HOURS: int = 24
-    
+
+    # Upstash Redis (Keep-alive)
+    UPSTASH_REDIS_URL: Optional[str] = None
+
     class Config:
         env_file = ".env"
 
