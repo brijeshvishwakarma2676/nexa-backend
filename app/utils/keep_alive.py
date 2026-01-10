@@ -65,14 +65,14 @@ class KeepAliveService:
         try:
             self.scheduler = AsyncIOScheduler()
 
-            # Ping every 30 minutes (1800 seconds)
+            # Ping every 10 minutes (600 seconds)
             # This is well before Render's 15-minute sleep timeout
             self.scheduler.add_job(
-                self.ping_redis, "interval", minutes=30, id="keep_alive_ping"
+                self.ping_redis, "interval", minutes=10, id="keep_alive_ping"
             )
 
             self.scheduler.start()
-            logger.info("🚀 Keep-alive scheduler started (pinging every 30 minutes)")
+            logger.info("🚀 Keep-alive scheduler started (pinging every 10 minutes)")
 
             # Send initial ping
             self.ping_redis()
